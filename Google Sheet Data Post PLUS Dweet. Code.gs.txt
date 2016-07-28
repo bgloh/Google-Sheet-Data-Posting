@@ -1,0 +1,241 @@
+//  1. Enter sheet name where data is to be written below
+        var SHEET_NAME = "CC3200";
+      
+         
+//  2. Run > setup
+//
+//  3. Publish > Deploy as web app
+//    - enter Project Version name and click 'Save New Version'
+//    - set security level and enable service (most likely execute as 'me' and access 'anyone, even anonymously)
+//
+//  4. Copy the 'Current web app URL' and post this in your form/script action
+//
+//  5. Insert column names on your destination sheet matching the parameter names of the data you are passing in (exactly matching case)
+ 
+var SCRIPT_PROP = PropertiesService.getScriptProperties(); // new property service
+
+
+
+// If you don't want to expose either GET or POST methods you can comment out the appropriate function
+function doGet(e){
+    var template = HtmlService.createTemplateFromFile('Index');
+    template.index = 0;
+   // Build and return HTML in IFRAME sandbox mode.
+ 
+  /////////////////////////////////////////////////////////////
+
+//  return handleResponse(e);
+  handleResponse(e);
+  // Build and return HTML in IFRAME sandbox mode.
+  
+  return template.evaluate()
+      .setTitle('Data Post to Google sheet,Dweet.io, Freeboard.io')
+      .setSandboxMode(HtmlService.SandboxMode.IFRAME);
+}
+ 
+function doPost(e){
+  return handleResponse(e);
+}
+ 
+function handleResponse(e) {
+  // shortly after my original solution Google announced the LockService[1]
+  // this prevents concurrent access overwritting data
+  // [1] http://googleappsdeveloper.blogspot.co.uk/2011/10/concurrency-and-google-apps-script.html
+  // we want a public lock, one that locks for all invocations
+  
+  //
+  var dataForDweet = []; // variable passed to Dweet.io
+  
+  var lock = LockService.getPublicLock();
+  lock.waitLock(30000);  // wait 30 seconds before conceding defeat.
+  
+  try {
+    //
+ 
+    // next set where we write the data - you could write to multiple/alternate destinations
+    var doc = SpreadsheetApp.openById(SCRIPT_PROP.getProperty("key"));
+    var sheet = doc.getSheetByName(SHEET_NAME);
+   // var index = 99;
+    
+    // we'll assume header is in row 1 but you can override with header_row in GET/POST data
+    var headRow = e.parameter.header_row || 1;
+//    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      var headers = sheet.getRange(1, 1, 1, 4).getValues()[0];
+//    var nextRow = sheet.getLastRow()+1; // get next row
+    var row = [];
+    
+    // do Dweet before logging data to Google sheet
+     doDweet2(e.parameter);
+
+    // loop through the header columns
+    for (i in headers){
+      if (headers[i] == "time"){ // special case if you include a 'Timestamp' column
+        row.push(new Date());
+      //  row.push(e);
+         
+      } else { // else use header name to get data
+      
+        row.push(e.parameter[headers[i]] );
+        dataForDweet[i] = e.parameter[headers[i]];
+      }
+    }
+    
+    // do Dweet (OLE MEHTHOD ; DEPRECATED)
+    //doDweet(headers,dataForDweet);
+
+    // more efficient to set values as [][] array than individually
+    var nextRow = sheet.getLastRow()+1; // get next row
+    sheet.getRange(nextRow, 1, 1, row.length).setValues([row]);
+    
+    
+    // return json success results
+    return ContentService
+    .createTextOutput(JSON.stringify({"result":e, "row": nextRow}))
+          .setMimeType(ContentService.MimeType.JSON); 
+    
+  
+  } catch(e){
+    // if error return this
+        Logger.log(e);
+    return ContentService
+          .createTextOutput(JSON.stringify({"result":"error", "error": e}))
+          .setMimeType(ContentService.MimeType.JSON);
+  } finally { //release lock
+    lock.releaseLock();
+  }
+}
+ 
+function setup() {
+    var doc = SpreadsheetApp.getActiveSpreadsheet();
+    SCRIPT_PROP.setProperty("key", doc.getId());
+}
+
+function doSomething(){
+  var k =100;
+  return k;
+}
+
+function buildAndOpenHtmlPage(e){
+//   var template = HtmlService.createTemplateFromFile('Index');
+// template.data = e.parameter;
+ 
+   // Build and return HTML in IFRAME sandbox mode.
+/*  return template.evaluate()
+      .setTitle('Web App Title')
+      .setSandboxMode(HtmlService.SandboxMode.IFRAME);*/
+}
+
+
+
+function getCurrentData(){
+    var doc = SpreadsheetApp.openById(SCRIPT_PROP.getProperty("key"));
+    var sheet = doc.getSheetByName(SHEET_NAME);
+   // var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    lastRow = sheet.getLastRow(); // get last row
+    var row = [];
+    var currentValue = [];
+     currentValue[0] =  lastRow; //last row with data
+     currentValue[1] =  sheet.getRange(lastRow, 1).getValues(); //time
+     currentValue[2] =  sheet.getRange(lastRow, 2).getValues(); // temperature
+     currentValue[3] =  sheet.getRange(lastRow, 3).getValues(); // humidity
+     currentValue[4] =  sheet.getRange(lastRow, 4).getValues(); // accelration
+  for(i=0;i < currentValue.length; i++)
+    row.push(currentValue[i]);
+
+  sheet.getRange(3, 6,1,row.length).setValues([row]);
+
+  return row;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Get the last value of a column
+// usage ; =lastValue("G")
+function lastValue(column) {
+  var lastRow = SpreadsheetApp.getActiveSheet().getMaxRows();
+  var values = SpreadsheetApp.getActiveSheet().getRange(column + "1:" + column + lastRow).getValues();
+
+  for (; values[lastRow - 1] == "" && lastRow > 0; lastRow--) {}
+  return values[lastRow - 1];
+}
+
+function onEdit(event) {
+  SpreadsheetApp.getActiveSheet().getRange("H2").setValue(lastValue("A"));
+  SpreadsheetApp.getActiveSheet().getRange("I2").setValue(lastValue("B"));
+  SpreadsheetApp.getActiveSheet().getRange("J2").setValue(lastValue("C"));
+  SpreadsheetApp.getActiveSheet().getRange("K2").setValue(lastValue("D"));
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                     //   
+// ******************* DWEET.IO SUB-ROUTINES ******************************************//
+//                                                                                     //    
+/////////////////////////////////////////////////////////////////////////////////////////
+
+function doDweet(headers,data) {
+  // dweet example : https://dweet.io/dweet/for/my-thing-name?hello=world
+  var baseUrl = "http://dweet.io/dweet/for/ByoungCC3200Energia?";
+ 
+ // persistent variable k
+  var k =  SCRIPT_PROP.getProperty('index'); //read index from script service
+ //  c = Math.random()*1000;
+ //  var payload = {a : c, b: 2.1, status : 'ON'};
+  
+  var payload = {increment : k}; // Dweet increment
+  k++;                           // Dweet increment
+  SCRIPT_PROP.setProperty('index', k);  // save index to script service
+  
+  // formating payload to Dweet.io
+  for (i in headers) {
+    if (headers[i] == "time") 
+      payload[headers[i]] = new Date();
+      else
+        payload[headers[i]] = data[i];
+    }
+
+  var options =
+      {
+        "method"  : "POST",   
+        "content-type" :  "application/json",
+        "payload" : payload,
+        "followRedirects" : true,
+        "muteHttpExceptions": true
+      };
+  var result = UrlFetchApp.fetch(baseUrl,options);
+   if (result.getResponseCode() == 200) {
+    var params = result.getContentText();
+    var resp = JSON.parse(params);   
+     Logger.log(resp);
+//    Logger.log (resp['with'][0].content.tick);
+//    Logger.log (resp['with'][0].content.temperature);
+  }  
+  else
+    Logger.log(result.getResponseCode());
+}
+
+
+function doDweet2(payload) {
+  // dweet example : https://dweet.io/dweet/for/my-thing-name?hello=world
+  var baseUrl = "http://dweet.io/dweet/for/ByoungCC3200Energia?";
+
+  var options =
+      {
+        "method"  : "POST",   
+        "content-type" :  "application/x-www-form-urlencoded",
+        "payload" : payload,
+        "followRedirects" : true,
+        "muteHttpExceptions": true
+      };
+  var result = UrlFetchApp.fetch(baseUrl,options);
+   if (result.getResponseCode() == 200) {
+    var params = result.getContentText();
+    var resp = JSON.parse(params);   
+     Logger.log(resp);
+//    Logger.log (resp['with'][0].content.tick);
+//    Logger.log (resp['with'][0].content.temperature);
+  }  
+  else
+    Logger.log(result.getResponseCode());
+}
+
+
